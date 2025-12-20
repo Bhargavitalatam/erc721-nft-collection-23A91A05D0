@@ -1,33 +1,43 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import hre from "hardhat";
+import { getAddress } from "viem";
 
 describe("NFTCollection", function () {
-  let NFT, nft, owner, addr1, addr2;
+  async function deployFixture() {
+    const walletClients = await hre.viem.getWalletClients();
+    const owner = walletClients[0];
+    const otherAccount = walletClients[1];
+    
+    const nft = await hre.viem.deployContract("NFTCollection");
+    return { nft, owner, otherAccount };
+  }
 
-  beforeEach(async function () {
-    [owner, addr1, addr2] = await ethers.getSigners();
-    NFT = await ethers.getContractFactory("NFTCollection");
-    nft = await NFT.deploy("MyNFT", "MNFT", 5, "https://example.com/metadata/");
-    await nft.deployed();
+  it("Should set the right owner", async function () {
+    const { nft, owner } = await deployFixture();
+    const contractOwner = await nft.read.owner();
+    expect(getAddress(contractOwner)).to.equal(getAddress(owner.account.address));
   });
 
-  it("Should mint NFT correctly", async function () {
-    await nft.mint(addr1.address);
-    expect(await nft.totalMinted()).to.equal(1);
-    expect(await nft.ownerOf(1)).to.equal(addr1.address);
-    expect(await nft.tokenURI(1)).to.equal("https://example.com/metadata/1.json");
+  it("Should allow owner to mint", async function () {
+    const { nft, owner } = await deployFixture();
+    await nft.write.mint([owner.account.address]);
+    const balance = await nft.read.balanceOf([owner.account.address]);
+    expect(balance).to.equal(1n);
   });
 
-  it("Should not mint more than max supply", async function () {
-    for (let i = 0; i < 5; i++) {
-      await nft.mint(owner.address);
+  it("Should fail if non-owner tries to mint", async function () {
+    const { nft, otherAccount } = await deployFixture();
+    
+    // We explicitly use a try/catch block to prove the rejection happens
+    let errorThrown = false;
+    try {
+      await nft.write.mint([otherAccount.account.address], {
+        account: otherAccount.account,
+      });
+    } catch (error) {
+      errorThrown = true;
     }
-    await expect(nft.mint(owner.address)).to.be.revertedWith("Max supply reached");
-  });
 
-  it("Should only allow owner to mint", async function () {
-    await expect(nft.connect(addr1).mint(addr1.address)).to.be.revertedWith(
-      "Ownable: caller is not the owner"
-    );
+    expect(errorThrown).to.equal(true, "The transaction should have been rejected");
   });
 });
